@@ -674,6 +674,22 @@ export function snapshotToString(snapshot: ITextSnapshot): string {
 	return chunks.join('');
 }
 
+export function stringToSnapshot(value: string): ITextSnapshot {
+	let done = false;
+
+	return {
+		read(): string | null {
+			if (!done) {
+				done = true;
+
+				return value;
+			}
+
+			return null;
+		}
+	};
+}
+
 export class TextSnapshotReadable implements VSBufferReadable {
 	private preambleHandled: boolean;
 

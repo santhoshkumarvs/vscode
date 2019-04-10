@@ -69,7 +69,7 @@ export class TextFileService extends Disposable implements ITextFileService {
 		@IFileService protected readonly fileService: IFileService,
 		@IUntitledEditorService private readonly untitledEditorService: IUntitledEditorService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
-		@IInstantiationService instantiationService: IInstantiationService,
+		@IInstantiationService protected instantiationService: IInstantiationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IModeService private readonly modeService: IModeService,
 		@IModelService private readonly modelService: IModelService,

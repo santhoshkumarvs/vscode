@@ -5,15 +5,13 @@
 
 import * as paths from 'vs/base/common/path';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as assert from 'assert';
 import { FileOperation, FileOperationEvent, IContent, IResolveContentOptions, IFileStat, IStreamContent, FileOperationError, FileOperationResult, IWriteTextFileOptions, ICreateFileOptions, IContentData, ITextSnapshot, ILegacyFileService, IFileStatWithMetadata, IFileService, IFileSystemProvider, etag } from 'vs/platform/files/common/files';
 import { MAX_FILE_SIZE, MAX_HEAP_SIZE } from 'vs/platform/files/node/fileConstants';
-import * as objects from 'vs/base/common/objects';
 import { timeout } from 'vs/base/common/async';
 import { URI as uri } from 'vs/base/common/uri';
 import * as nls from 'vs/nls';
-import { isWindows, isMacintosh } from 'vs/base/common/platform';
+import { isWindows } from 'vs/base/common/platform';
 import { IDisposable, Disposable } from 'vs/base/common/lifecycle';
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import * as pfs from 'vs/base/node/pfs';
@@ -24,7 +22,6 @@ import { IEnvironmentService } from 'vs/platform/environment/common/environment'
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
 import { Schemas } from 'vs/base/common/network';
 import { onUnexpectedError } from 'vs/base/common/errors';
-import product from 'vs/platform/product/node/product';
 import { IEncodingOverride, ResourceEncodings } from 'vs/workbench/services/files/node/encoding';
 import { createReadableOfSnapshot } from 'vs/workbench/services/files/node/streams';
 import { withUndefinedAsNull } from 'vs/base/common/types';
@@ -383,10 +380,6 @@ export class LegacyFileService extends Disposable implements ILegacyFileService 
 	//#region File Writing
 
 	updateContent(resource: uri, value: string | ITextSnapshot, options: IWriteTextFileOptions = Object.create(null)): Promise<IFileStatWithMetadata> {
-		if (options.writeElevated) {
-			return this.doUpdateContentElevated(resource, value, options);
-		}
-
 		return this.doUpdateContent(resource, value, options);
 	}
 
@@ -498,68 +491,6 @@ export class LegacyFileService extends Disposable implements ILegacyFileService 
 
 			// resolve
 			return this.fileService.resolve(resource);
-		});
-	}
-
-	private doUpdateContentElevated(resource: uri, value: string | ITextSnapshot, options: IWriteTextFileOptions = Object.create(null)): Promise<IFileStatWithMetadata> {
-		const absolutePath = this.toAbsolutePath(resource);
-
-		// 1.) check file for writing
-		return this.checkFileBeforeWriting(absolutePath, options, options.overwriteReadonly /* ignore readonly if we overwrite readonly, this is handled via sudo later */).then(exists => {
-			const writeOptions: IWriteTextFileOptions = objects.assign(Object.create(null), options);
-			writeOptions.writeElevated = false;
-			writeOptions.encoding = this._encoding.getWriteEncoding(resource, options.encoding).encoding;
-
-			// 2.) write to a temporary file to be able to copy over later
-			const tmpPath = paths.join(os.tmpdir(), `code-elevated-${Math.random().toString(36).replace(/[^a-z]+/g, '').substr(0, 6)}`);
-			return this.updateContent(uri.file(tmpPath), value, writeOptions).then(() => {
-
-				// 3.) invoke our CLI as super user
-				return import('sudo-prompt').then(sudoPrompt => {
-					return new Promise<void>((resolve, reject) => {
-						const promptOptions = {
-							name: this.environmentService.appNameLong.replace('-', ''),
-							icns: (isMacintosh && this.environmentService.isBuilt) ? paths.join(paths.dirname(this.environmentService.appRoot), `${product.nameShort}.icns`) : undefined
-						};
-
-						const sudoCommand: string[] = [`"${this.environmentService.cliPath}"`];
-						if (options.overwriteReadonly) {
-							sudoCommand.push('--file-chmod');
-						}
-						sudoCommand.push('--file-write', `"${tmpPath}"`, `"${absolutePath}"`);
-
-						sudoPrompt.exec(sudoCommand.join(' '), promptOptions, (error: string, stdout: string, stderr: string) => {
-							if (error || stderr) {
-								reject(error || stderr);
-							} else {
-								resolve(undefined);
-							}
-						});
-					});
-				}).then(() => {
-
-					// 3.) delete temp file
-					return pfs.rimraf(tmpPath, pfs.RimRafMode.MOVE).then(() => {
-
-						// 4.) resolve again
-						return this.fileService.resolve(resource);
-					});
-				});
-			});
-		}).then(undefined, error => {
-			if (this.environmentService.verbose) {
-				onUnexpectedError(`Unable to write to file '${resource.toString(true)}' as elevated user (${error})`);
-			}
-
-			if (!FileOperationError.isFileOperationError(error)) {
-				error = new FileOperationError(
-					nls.localize('filePermission', "Permission denied writing to file ({0})", resource.toString(true)),
-					FileOperationResult.FILE_PERMISSION_DENIED,
-					options
-				);
-			}
-
-			return Promise.reject(error);
 		});
 	}
 
